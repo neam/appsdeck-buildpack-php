@@ -10,8 +10,9 @@ validate_env
 
 function swift_upload() {
   file="$1"
-  dest="$2"
+  # dest="$2"
 
+  opts=""
   # Require swift client > 1.0
   # if [ "x$dest" != "x" ] ; then
   #   opts="--object-name $dest"   

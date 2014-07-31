@@ -1,5 +1,13 @@
 #!/bin/bash
 
+function install_package() {
+  name=$1
+  version=$2
+  curl -LO ${SWIFT_URL}/package/$name-$version.tgz
+  mkdir -p /app/vendor/$name
+  tar -xv -C /app/vendor/$name -f $name-$version.tgz
+}
+
 function validate_env() {
   if [ -z "$SWIFT_BUCKET" ]; then
       echo "Must set SWIFT_BUCKET environment variable" >&2

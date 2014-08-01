@@ -71,7 +71,11 @@ function php_api_version() {
 }
 
 function has_heroku_extra() {
-   jq --raw-output '.extra.heroku // ""' < "$BUILD_DIR/composer.json"
+    test -n "$(jq --raw-output '.extra.heroku // ""' < "$BUILD_DIR/composer.json")"
+}
+
+function has_hhvm_engine() {
+    test -n "$(jq --raw-output ".extra.${composer_extra_key}.engines.hhvm // \"\"" < "$BUILD_DIR/composer.json")"
 }
 
 function package_document_root() {
@@ -86,24 +90,19 @@ function package_framework() {
     jq --raw-output ".extra.${composer_extra_key}.framework // \"\"" < "$BUILD_DIR/composer.json"
 }
 
-function package_nginx_version() {
-    jq --raw-output ".extra.${composer_extra_key}.engines.nginx // \"default\"" < "$BUILD_DIR/composer.json"
+function package_version() {
+    local package=$1
+    jq --raw-output ".extra.${composer_extra_key}.engines.${package} // \"default\"" < "$BUILD_DIR/composer.json"
 }
 
-function package_php_version() {
-    jq --raw-output ".extra.${composer_extra_key}.engines.php // \"default\"" < "$BUILD_DIR/composer.json"
+function package_config() {
+    local package=$1
+    jq --raw-output ".extra.${composer_extra_key}[\"${package}-config\"] // [] | .[]" < "$BUILD_DIR/composer.json"
 }
 
-function package_php_config() {
-    jq --raw-output ".extra.${composer_extra_key}[\"php-config\"] // [] | .[]" < "$BUILD_DIR/composer.json"
-}
-
-function package_php_includes() {
-    jq --raw-output ".extra.${composer_extra_key}[\"php-includes\"] // [] | .[]" < "$BUILD_DIR/composer.json"
-}
-
-function package_nginx_includes() {
-    jq --raw-output ".extra.${composer_extra_key}[\"nginx-includes\"] // [] | .[]" < "$BUILD_DIR/composer.json"
+function package_includes() {
+    local package=$1
+    jq --raw-output ".extra.${composer_extra_key}[\"${package}-includes\"] // [] | .[]" < "$BUILD_DIR/composer.json"
 }
 
 function package_log_files() {
@@ -134,8 +133,10 @@ chmod +x "$BUILD_DIR/bin/jq"
 
 DEFAULT_PHP="5.5.15"
 DEFAULT_NGINX="1.6.0"
+DEFAULT_HHVM="3.2.0"
 
 AVAILABLE_PHP_VERSIONS=$(curl "${SWIFT_URL}/manifest.php" 2> /dev/null)
+AVAILABLE_HHVM_VERSIONS=$(curl "${SWIFT_URL}/manifest.hhvm" 2> /dev/null)
 AVAILABLE_NGINX_VERSIONS=$(curl "${SWIFT_URL}/manifest.nginx" 2> /dev/null)
 
 MCRYPT_VERSION="2.5.8"
@@ -144,12 +145,13 @@ NGINX_VERSION="default"
 DOCUMENT_ROOT=
 INDEX_DOCUMENT="index.php"
 FRAMEWORK=
+HHVM_EXTRA_CONFIG=
 PHP_EXTRA_CONFIG=
 PHP_INCLUDES=
 COMPILE_CMD=
 NGINX_INCLUDES=
 NEWRELIC_VERSION=4.4.5.35
-LOG_FILES=( "/app/vendor/nginx/logs/access.log" "/app/vendor/nginx/logs/error.log" "/app/vendor/php/var/log/error.log" )
+LOG_FILES=( "/app/vendor/nginx/logs/access.log" "/app/vendor/nginx/logs/error.log" )
 
 check_composer_syntax "$BUILD_DIR"
 check_composer_json_and_lock "$BUILD_DIR"
@@ -157,196 +159,55 @@ check_composer_json_and_lock "$BUILD_DIR"
 # Read config variables from composer.json if it exists
 if [ -f "$BUILD_DIR/composer.json" ]; then
   composer_extra_key="paas"
-  if [ -n "$(has_heroku_extra)" ] ; then
+  if has_heroku_extra ; then
     protip "Your composer.json is using the key 'extra' → 'heroku', you should switch to 'extra' → 'paas' for standardization"
     composer_extra_key="heroku"
   fi
 
-  PHP_VERSION=$(package_php_version)
-  NGINX_VERSION=$(package_nginx_version)
+  PHP_VERSION=$(package_version php)
+  NGINX_VERSION=$(package_version nginx)
+  HHVM_VERSION=$(package_version hhvm)
   DOCUMENT_ROOT=$(package_document_root)
   INDEX_DOCUMENT=$(package_index_file)
   FRAMEWORK=$(package_framework)
-  PHP_EXTRA_CONFIG=$(package_php_config)
-  PHP_INCLUDES=$(package_php_includes)
+  HHVM_EXTRA_CONFIG=$(package_config hhvm)
+  PHP_EXTRA_CONFIG=$(package_config php)
+  PHP_INCLUDES=$(package_includes php)
   COMPILE_CMD=$(package_compile_cmd)
-  NGINX_INCLUDES=$(package_nginx_includes)
+  NGINX_INCLUDES=$(package_includes nginx)
   USER_LOG_FILES=$(package_log_files)
 fi
 
 # Try reading PHP version from .php-version file in project
-if [ -f "$BUILD_DIR/.php-version" ]; then
-    PHP_VERSION=$(cat "$BUILD_DIR/.php-version")
-fi
+[ -f "$BUILD_DIR/.php-version" ] && PHP_VERSION=$(cat "$BUILD_DIR/.php-version")
+[ "$PHP_VERSION" = "default" ] && PHP_VERSION="$DEFAULT_PHP"
+[ "$NGINX_VERSION" = "default" ] && NGINX_VERSION="$DEFAULT_NGINX"
+[ "$HHVM_VERSION" = "default"  ] && HHVM_VERSION="$DEFAULT_HHVM" 
 
-if [ "$PHP_VERSION" = "default" ]; then
-    PHP_VERSION="$DEFAULT_PHP"
-fi
-
-if [ "$NGINX_VERSION" = "default" ]; then
-    NGINX_VERSION="$DEFAULT_NGINX"
-fi
 
 # Look for ".*" versions, match them against all available versions
 # and select the latest version which was found.
-if echo "$PHP_VERSION" | grep '\*' &>/dev/null; then
-    PHP_VERSION=$(echo "$AVAILABLE_PHP_VERSIONS" | grep "^$PHP_VERSION$" | sort -r | head -n1)
-fi
-
-if echo "$NGINX_VERSION" | grep '\*' &>/dev/null; then
-    NGINX_VERSION=$(echo "$AVAILABLE_NGINX_VERSIONS" | grep "^$NGINX_VERSION$" | sort -r | head -n1)
-fi
+echo "$PHP_VERSION" | grep -q '\*' && \
+  PHP_VERSION=$(echo "$AVAILABLE_PHP_VERSIONS" | grep "^$PHP_VERSION$" | sort -r | head -n1)
+echo "$NGINX_VERSION" | grep -q '\*' && \
+  NGINX_VERSION=$(echo "$AVAILABLE_NGINX_VERSIONS" | grep "^$NGINX_VERSION$" | sort -r | head -n1)
+echo "$HHVM_VERSION" | grep -q '\*' && \
+  HHVM_VERSION=$(echo "$AVAILABLE_HHVM_VERSIONS" | grep "^$HHVM_VERSION$" | sort -r | head -n1)
 
 VENDORED_NGINX=/app/vendor/nginx
 VENDORED_PHP=/app/vendor/php
+VENDORED_HHVM=/app/vendor/hhvm
 
 [ ! -d "$BUILD_DIR/vendor" ] && mkdir -p "$BUILD_DIR/vendor"
 
 status "Bundling NGINX ${NGINX_VERSION}"
 fetch_engine_package nginx "$NGINX_VERSION" /app/vendor/nginx | indent
 
-status "Bundling PHP ${PHP_VERSION}"
-
-# Install libraries also on build container, so PHP doesn't wayne about missing
-# dynamic libraries when running it during the slug compilation.
-fetch_package "libicu-51" /app/vendor/libicu > /dev/null
-fetch_package "libmcrypt-${MCRYPT_VERSION}" /app/vendor/libmcrypt > /dev/null
-
-fetch_engine_package php "$PHP_VERSION" /app/vendor/php | indent
-
 test ! -d ".profile.d" && mkdir -p .profile.d || true
 
-cat > ".profile.d/php.sh" <<SH
-export PATH=/sbin:/bin:/usr/sbin:/usr/bin:/app/bin:/app/vendor/nginx/sbin:/app/vendor/php/sbin:/app/vendor/php/bin:/app/vendor/bin:\$PATH
-export APP_BUILD_TIME=$(date +%Y%m%d%H%M%S)
-SH
-
-source ".profile.d/php.sh"
-
-# Fetch additional extensions
-status "Bundling extensions"
-echo "       apcu"
-fetch_package "ext/$(php_api_version)/php-apcu" "/app/vendor/php" | indent
-echo "       phpredis"
-fetch_package "ext/$(php_api_version)/php-redis" "/app/vendor/php" | indent
-echo "       mongo"
-fetch_package "ext/$(php_api_version)/php-mongo" "/app/vendor/php" | indent
-
-if [ -f "$BUILD_DIR/composer.json" ] && package_newrelic_enabled; then
-    install_newrelic "$NEWRELIC_VERSION"
+if has_hhvm_engine ; then
+  . "$basedir/compile_hhvm"
+else
+  . "$basedir/compile_php"
 fi
 
-if [ -n "$BUILDPACK_DEBUG" ]; then
-    ls -R /app/vendor/nginx
-    ls -R /app/vendor/php
-fi
-
-mkdir -p "conf"
-cp "$basedir/../conf/nginx/base.conf.erb" "conf/nginx.conf.erb"
-cp "$basedir/../conf/php/php-fpm.conf" "/app/vendor/php/etc/php-fpm.conf"
-cp "$basedir/../conf/php/php.ini" "/app/vendor/php/etc/php.ini"
-
-pear config-set php_ini /app/vendor/php/etc/php.ini &> /dev/null
-
-for conf in $PHP_EXTRA_CONFIG; do
-    echo "$conf" >> "/app/vendor/php/etc/php.ini"
-done
-
-for include in $PHP_INCLUDES; do
-    cp "$BUILD_DIR/$include" "/app/vendor/php/etc/conf.d/"
-done
-
-install_node_deps "$BUILD_DIR"
-install_composer_deps "$BUILD_DIR"
-
-# Detect PHP framework
-# Set FRAMEWORK
-detect_framework "$BUILD_DIR"
-
-# Fall back to classic mode
-if [ -z "$FRAMEWORK" ]; then
-    FRAMEWORK="$basedir/../frameworks/default"
-fi
-
-# Try to load the framework from the "frameworks" directory if it's just a
-# simple framework name like "symfony2"
-if [ ! -f "$FRAMEWORK" ] && [ -f "$basedir/../frameworks/$FRAMEWORK" ]; then
-    FRAMEWORK="$basedir/../frameworks/$FRAMEWORK"
-fi
-
-if [ ! -f "$FRAMEWORK" ]; then
-    error "Framework \"$FRAMEWORK\" not found!"
-fi
-
-"$FRAMEWORK" compile "$BUILD_DIR" "$CACHE_DIR"
-
-LOG_FILES=$(unique_array ${LOG_FILES[@]} ${USER_LOG_FILES[@]})
-if [ -n "$FRAMEWORK" ] && [ -f "$FRAMEWORK" ]; then
-    FRAMEWORK_LOG_FILES=$("$FRAMEWORK" get-log-files)
-    LOG_FILES=$(unique_array ${LOG_FILES[@]} ${FRAMEWORK_LOG_FILES[@]})
-fi
-
-if [ -n "$COMPILE_CMD" ]; then
-    status "Running compile commands"
-    while read -r cmd; do
-        echo "Running '$cmd'" | indent
-        eval $cmd             | indent
-    done <<< "$COMPILE_CMD"
-fi
-
-if [ -n "$FRAMEWORK" ] && [ -f "$FRAMEWORK" ]; then
-    "$FRAMEWORK" end "$BUILD_DIR" "$CACHE_DIR"
-fi
-
-"$FRAMEWORK" post-compile "$BUILD_DIR" "$CACHE_DIR" || true
-
-status "Vendoring binaries into slug"
-mv /app/vendor/libmcrypt vendor/libmcrypt
-mv /app/vendor/libicu vendor/libicu
-mv /app/vendor/nginx vendor/nginx
-mv /app/vendor/php vendor/php
-
-mkdir -p "bin"
-
-cat > "bin/run" <<SH
-#!/usr/bin/env bash
-
-pmsgr=/tmp/pmsgr
-rm -f \$pmsgr
-mkfifo \$pmsgr
-
-for var in \`env | cut -f1 -d=\`; do
-    echo "env[\$var] = \\$\${var}" >> /app/vendor/php/etc/php-fpm.conf
-done
-
-export DOCUMENT_ROOT="$DOCUMENT_ROOT"
-export INDEX_DOCUMENT="$INDEX_DOCUMENT"
-export NGINX_INCLUDES="$NGINX_INCLUDES"
-
-if [ -n "\$NEW_RELIC_LICENSE_KEY" ]; then
-    echo "newrelic.license=\"\$NEW_RELIC_LICENSE_KEY\"" > /app/vendor/php/etc/conf.d/newrelic_license.ini
-fi
-
-erb conf/nginx.conf.erb > /app/vendor/nginx/conf/nginx.conf
-erb conf/site.conf.erb > /app/vendor/nginx/conf/site.conf
-
-`init_log_plex ${LOG_FILES}`
-`tail_log_plex ${LOG_FILES} ${SYS_LOG_FILES}`
-
-(
-    exec php-fpm -p "/app/vendor/php"
-    \$pmsgr < "php-fpm"
-)&
-
-(
-    exec nginx -p "/app/vendor/nginx" -c /app/vendor/nginx/conf/nginx.conf
-    \$pmsgr < "nginx"
-)&
-
-
-read exitproc <\$pmsgr
-echo "Boot failed: \$exitproc"
-exit 1
-SH
-
-chmod +x "bin/run"

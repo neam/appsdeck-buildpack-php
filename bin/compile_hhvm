@@ -1,0 +1,30 @@
+# Script sourced from 'compile' if HHVM has to be bundled
+
+status "Bundling HHVM ${HHVM_VERSION}"
+fetch_engine_package hhvm "$HHVM_VERSION" /app/vendor/hhvm | indent
+
+cat > ".profile.d/hhvm.sh" <<SH
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin:/app/bin:/app/vendor/nginx/sbin:\
+/app/vendor/hhvm/usr/sbin:/app/vendor/hhvm/usr/bin:/app/vendor/bin:\$PATH
+
+export APP_BUILD_TIME=$(date +%Y%m%d%H%M%S)
+SH
+
+source ".profile.d/hhvm.sh"
+
+if [ -n "$BUILDPACK_DEBUG" ]; then
+    ls -R /app/vendor/nginx
+    ls -R /app/vendor/hhvm
+fi
+
+mkdir -p "conf"
+cp "$basedir/../conf/nginx/base.conf.erb" "conf/nginx.conf.erb"
+cp "$basedir/../conf/hhvm/php.ini" "/app/vendor/hhvm/etc/hhvm/php.ini"
+
+for conf in $HHVM_EXTRA_CONFIG; do
+    echo "$conf" >> "/app/vendor/hhvm/etc/php/hhvm.ini"
+done
+
+for include in $HHVM_INCLUDES; do
+    cp "$BUILD_DIR/$include" "/app/vendor/hhvm/etc/hhvm/conf.d/"
+done

@@ -1,0 +1,147 @@
+# Script sourced from 'compile' if PHP has to be bundled
+
+status "Bundling PHP ${PHP_VERSION}"
+fetch_package "libicu-51" /app/vendor/libicu > /dev/null
+fetch_package "libmcrypt-${MCRYPT_VERSION}" /app/vendor/libmcrypt > /dev/null
+fetch_engine_package php "$PHP_VERSION" /app/vendor/php | indent
+
+cat > ".profile.d/php.sh" <<SH
+export PATH=/sbin:/bin:/usr/sbin:/usr/bin:/app/bin:/app/vendor/nginx/sbin:\
+/app/vendor/php/sbin:/app/vendor/php/bin:/app/vendor/bin:\$PATH
+
+export APP_BUILD_TIME=$(date +%Y%m%d%H%M%S)
+SH
+
+# Add php logfile to the logfiles to follow
+LOG_FILES="$LOG_FILES /app/vendor/php/var/log/error.log"
+
+# Add vendors to path
+source ".profile.d/php.sh"
+
+# Fetch additional extensions
+status "Bundling extensions"
+echo "       apcu"
+fetch_package "ext/$(php_api_version)/php-apcu" "/app/vendor/php" | indent
+echo "       phpredis"
+fetch_package "ext/$(php_api_version)/php-redis" "/app/vendor/php" | indent
+echo "       mongo"
+fetch_package "ext/$(php_api_version)/php-mongo" "/app/vendor/php" | indent
+
+if [ -f "$BUILD_DIR/composer.json" ] && package_newrelic_enabled; then
+    install_newrelic "$NEWRELIC_VERSION"
+fi
+
+if [ -n "$BUILDPACK_DEBUG" ]; then
+    ls -R /app/vendor/nginx
+    ls -R /app/vendor/php
+fi
+
+mkdir -p "conf"
+cp "$basedir/../conf/nginx/base.conf.erb" "conf/nginx.conf.erb"
+cp "$basedir/../conf/php/php-fpm.conf" "/app/vendor/php/etc/php-fpm.conf"
+cp "$basedir/../conf/php/php.ini" "/app/vendor/php/etc/php.ini"
+
+pear config-set php_ini /app/vendor/php/etc/php.ini &> /dev/null
+
+for conf in $PHP_EXTRA_CONFIG; do
+    echo "$conf" >> "/app/vendor/php/etc/php.ini"
+done
+
+for include in $PHP_INCLUDES; do
+    cp "$BUILD_DIR/$include" "/app/vendor/php/etc/conf.d/"
+done
+
+install_node_deps "$BUILD_DIR"
+install_composer_deps "$BUILD_DIR"
+
+# Detect PHP framework
+# Set FRAMEWORK
+detect_framework "$BUILD_DIR"
+
+# Fall back to classic mode
+if [ -z "$FRAMEWORK" ]; then
+    FRAMEWORK="$basedir/../frameworks/default"
+fi
+
+# Try to load the framework from the "frameworks" directory if it's just a
+# simple framework name like "symfony2"
+if [ ! -f "$FRAMEWORK" ] && [ -f "$basedir/../frameworks/$FRAMEWORK" ]; then
+    FRAMEWORK="$basedir/../frameworks/$FRAMEWORK"
+fi
+
+if [ ! -f "$FRAMEWORK" ]; then
+    error "Framework \"$FRAMEWORK\" not found!"
+fi
+
+"$FRAMEWORK" compile "$BUILD_DIR" "$CACHE_DIR"
+
+LOG_FILES=$(unique_array ${LOG_FILES[@]} ${USER_LOG_FILES[@]})
+if [ -n "$FRAMEWORK" ] && [ -f "$FRAMEWORK" ]; then
+    FRAMEWORK_LOG_FILES=$("$FRAMEWORK" get-log-files)
+    LOG_FILES=$(unique_array ${LOG_FILES[@]} ${FRAMEWORK_LOG_FILES[@]})
+fi
+
+if [ -n "$COMPILE_CMD" ]; then
+    status "Running compile commands"
+    while read -r cmd; do
+        echo "Running '$cmd'" | indent
+        eval $cmd             | indent
+    done <<< "$COMPILE_CMD"
+fi
+
+if [ -n "$FRAMEWORK" ] && [ -f "$FRAMEWORK" ]; then
+    "$FRAMEWORK" end "$BUILD_DIR" "$CACHE_DIR"
+fi
+
+"$FRAMEWORK" post-compile "$BUILD_DIR" "$CACHE_DIR" || true
+
+status "Vendoring binaries into slug"
+mv /app/vendor/libmcrypt vendor/libmcrypt
+mv /app/vendor/libicu vendor/libicu
+mv /app/vendor/nginx vendor/nginx
+mv /app/vendor/php vendor/php
+
+mkdir -p "bin"
+
+cat > "bin/run" <<SH
+#!/usr/bin/env bash
+
+pmsgr=/tmp/pmsgr
+rm -f \$pmsgr
+mkfifo \$pmsgr
+
+for var in \`env | cut -f1 -d=\`; do
+    echo "env[\$var] = \\$\${var}" >> /app/vendor/php/etc/php-fpm.conf
+done
+
+export DOCUMENT_ROOT="$DOCUMENT_ROOT"
+export INDEX_DOCUMENT="$INDEX_DOCUMENT"
+export NGINX_INCLUDES="$NGINX_INCLUDES"
+
+if [ -n "\$NEW_RELIC_LICENSE_KEY" ]; then
+    echo "newrelic.license=\"\$NEW_RELIC_LICENSE_KEY\"" > /app/vendor/php/etc/conf.d/newrelic_license.ini
+fi
+
+erb conf/nginx.conf.erb > /app/vendor/nginx/conf/nginx.conf
+erb conf/site.conf.erb > /app/vendor/nginx/conf/site.conf
+
+`init_log_plex ${LOG_FILES}`
+`tail_log_plex ${LOG_FILES} ${SYS_LOG_FILES}`
+
+(
+    exec php-fpm -p "/app/vendor/php"
+    \$pmsgr < "php-fpm"
+)&
+
+(
+    exec nginx -p "/app/vendor/nginx" -c /app/vendor/nginx/conf/nginx.conf
+    \$pmsgr < "nginx"
+)&
+
+
+read exitproc <\$pmsgr
+echo "Boot failed: \$exitproc"
+exit 1
+SH
+
+chmod +x "bin/run"

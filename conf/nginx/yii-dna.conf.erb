@@ -1,0 +1,37 @@
+<% require 'rubygems' %>
+<% require 'json' %>
+<% JSON.parse(ENV['NGINX_LOCATIONS']).each do |location| %>
+
+    location <%= location["location"] %> {
+
+    <%# assume this is a location-block for a yii app if document-root is set %>
+    <% if location.has_key? "document-root" and location["document-root"].to_s != "" %>
+        root /app/<%= location["document-root"] %>;
+
+        # serve static files direct + allow friendly urls
+        try_files $uri $uri/ <%= location["location"] %><%= location["index-document"] %>?$args;
+
+        # Prevent access to yii protected directories
+        location ~ ^<%= location["location"] %>(protected|framework|themes/\w+/views) {
+        deny  all;
+        }
+    <% end %>
+
+        location ~ \.php {
+        include fastcgi_params;
+
+        fastcgi_buffers 256 4k;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTPS $proxied_https;
+        fastcgi_pass php;
+        }
+
+    <% if location.has_key? "nginx-includes" %>
+        <% location["nginx-includes"].each do |f| %>
+            include /app/<%= f %>;
+        <% end %>
+    <% end %>
+
+    } # / location
+
+<% end %>

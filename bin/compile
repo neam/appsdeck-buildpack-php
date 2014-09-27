@@ -106,6 +106,10 @@ function package_nginx_includes() {
     jq --raw-output ".extra.${composer_extra_key}[\"nginx-includes\"] // [] | .[]" < "$BUILD_DIR/composer.json"
 }
 
+function package_nginx_locations() {
+    jq --raw-output '.extra.heroku["nginx-locations"] // []' < "$BUILD_DIR/composer.json"
+}
+
 function package_log_files() {
     jq --raw-output ".extra.${composer_extra_key}[\"log-files\"] // [] | .[]" < "$BUILD_DIR/composer.json"
 }
@@ -148,6 +152,7 @@ PHP_EXTRA_CONFIG=
 PHP_INCLUDES=
 COMPILE_CMD=
 NGINX_INCLUDES=
+NGINX_LOCATIONS=
 NEWRELIC_VERSION=4.4.5.35
 LOG_FILES=( "/app/vendor/nginx/logs/access.log" "/app/vendor/nginx/logs/error.log" "/app/vendor/php/var/log/error.log" )
 
@@ -171,6 +176,7 @@ if [ -f "$BUILD_DIR/composer.json" ]; then
   PHP_INCLUDES=$(package_php_includes)
   COMPILE_CMD=$(package_compile_cmd)
   NGINX_INCLUDES=$(package_nginx_includes)
+  NGINX_LOCATIONS=$(package_nginx_locations)
   USER_LOG_FILES=$(package_log_files)
 fi
 

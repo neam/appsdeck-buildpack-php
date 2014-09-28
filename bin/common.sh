@@ -66,3 +66,5 @@ function mktmpdir() {
     echo $dir
 }
 
+# Show script name and line number when errors occur to make buildpack errors easier to debug
+trap 'error "Script error in $0 on or near line ${LINENO}"' ERR

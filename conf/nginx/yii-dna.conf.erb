@@ -1,3 +1,27 @@
+<% if ENV.has_key? "DOCUMENT_ROOT" and ENV['DOCUMENT_ROOT'].to_s != "" %>
+root /app/<%= ENV['DOCUMENT_ROOT'] %>;
+<% else %>
+root /app;
+<% end %>
+
+# Attempt the uri, uri+/, then fall back to yii's index.php with args included
+location / {
+    try_files $uri $uri/ /<%= ENV['INDEX_DOCUMENT'] %>?$args;
+}
+
+# Prevent access to yii protected directories
+location ~ ^/(protected|framework|themes/\w+/views) {
+    deny  all;
+}
+
+location ~ \.php {
+    include fastcgi_params;
+    fastcgi_buffers 256 4k;
+    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    fastcgi_param HTTPS $proxied_https;
+    fastcgi_pass php;
+}
+
 <% require 'rubygems' %>
 <% require 'json' %>
 <% JSON.parse(ENV['NGINX_LOCATIONS']).each do |location| %>
@@ -6,13 +30,13 @@
 
     <%# assume this is a location-block for a yii app if document-root is set %>
     <% if location.has_key? "document-root" and location["document-root"].to_s != "" %>
-        alias /app/<%= location["document-root"] %>;
+        root /app/<%= location["document-root"] %>;
 
         # serve static files direct + allow friendly urls
-        try_files $uri $uri/ /<%= location["index-document"] %>?$args;
+        try_files $uri $uri/ <%= location["location"] %><%= location["index-document"] %>?$args;
 
         # Prevent access to yii protected directories
-        location ~ ^/(protected|framework|themes/\w+/views) {
+        location ~ ^<%= location["location"] %>(protected|framework|themes/\w+/views) {
         deny  all;
         }
     <% end %>

@@ -19,7 +19,11 @@ http {
                       '"$request" $status $body_bytes_sent '
                       '"$http_referer" "$http_user_agent"';
 
+    <% if ENV.has_key? "NGINX_ERROR_LOG_LEVEL" and ENV['NGINX_ERROR_LOG_LEVEL'].to_s != "" %>
+    error_log logs/error.log <%= ENV['NGINX_ERROR_LOG_LEVEL'] %>;
+    <% else %>
     error_log logs/error.log notice;
+    <% end %>
     access_log logs/access.log specialLog;
 
     client_max_body_size 100m;

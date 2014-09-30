@@ -9,10 +9,10 @@
         root /app/<%= location["document-root"] %>;
 
         # serve static files direct + allow friendly urls
-        try_files $uri $uri/ <%= location["location"] %><%= location["index-document"] %>?$args;
+        try_files $uri $uri/ /<%= location["index-document"] %>?$args;
 
         # Prevent access to yii protected directories
-        location ~ ^<%= location["location"] %>(protected|framework|themes/\w+/views) {
+        location ~ ^/(protected|framework|themes/\w+/views) {
         deny  all;
         }
     <% end %>

@@ -37,17 +37,16 @@ location ~ \.php {
 
         # Prevent access to yii protected directories
         location ~ ^<%= location["location"] %>(protected|framework|themes/\w+/views) {
-        deny  all;
+            deny  all;
         }
     <% end %>
 
         location ~ \.php {
-        include fastcgi_params;
-
-        fastcgi_buffers 256 4k;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_param HTTPS $proxied_https;
-        fastcgi_pass php;
+            include fastcgi_params;
+            fastcgi_buffers 256 4k;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_param HTTPS $proxied_https;
+            fastcgi_pass php;
         }
 
     <% if location.has_key? "nginx-includes" %>

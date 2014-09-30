@@ -6,7 +6,7 @@
 
     <%# assume this is a location-block for a yii app if document-root is set %>
     <% if location.has_key? "document-root" and location["document-root"].to_s != "" %>
-        root /app/<%= location["document-root"] %>;
+        alias /app/<%= location["document-root"] %>;
 
         # serve static files direct + allow friendly urls
         try_files $uri $uri/ /<%= location["index-document"] %>?$args;

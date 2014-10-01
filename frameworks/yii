@@ -11,9 +11,17 @@ function sets_framework_yii() {
     [ $(jq --raw-output '.extra.heroku.framework' < "$BUILD_DIR/composer.json") == "yii" ]
 }
 
+function sets_framework_yii_dna() {
+    [ $(jq --raw-output '.extra.heroku.framework' < "$BUILD_DIR/composer.json") == "yii-dna" ]
+}
+
 case "$1" in
     detect)
         if [ ! -f "$BUILD_DIR/composer.json" ]; then
+            exit 1
+        fi
+
+        if sets_framework_yii_dna; then
             exit 1
         fi
 

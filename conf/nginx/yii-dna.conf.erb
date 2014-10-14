@@ -57,4 +57,9 @@ location ~ \.php {
 
     } # / location
 
+    # support accessing the location without a trailing slash
+    location <%= location["location"].chomp("/") %> {
+            rewrite ^(.*[^/])$ $1/ permanent;
+    }
+
 <% end %>
